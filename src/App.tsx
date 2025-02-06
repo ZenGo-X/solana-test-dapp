@@ -20,6 +20,8 @@ import {
   Connection,
   TransactionSignature,
   SendOptions,
+  VersionedTransaction,
+  TransactionMessage,
 } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
@@ -87,6 +89,7 @@ interface LoadingState {
   signAndSendAllTransactions: boolean;
   sendToken: boolean;
   fetchBalance: boolean;
+  signAndSendV0Transaction: boolean;
 }
 
 interface SolanaProvider {
@@ -94,6 +97,9 @@ interface SolanaProvider {
   signMessage: (message: Uint8Array) => Promise<Uint8Array>;
   signTransaction: (transaction: Transaction) => Promise<Transaction>;
   signAllTransactions: (transactions: Transaction[]) => Promise<Transaction[]>;
+  signAndSendTransaction: (
+    transaction: Transaction | VersionedTransaction
+  ) => Promise<{ signature: string }>;
 }
 
 // RPC Method Types
@@ -145,6 +151,7 @@ export default function App() {
     signAndSendAllTransactions: false,
     sendToken: false,
     fetchBalance: false,
+    signAndSendV0Transaction: false,
   });
 
   // Add debug logging
@@ -339,7 +346,7 @@ export default function App() {
     params?: SignAndSendTransactionParams
   ) => {
     if (
-      !walletProvider?.signTransaction ||
+      !walletProvider?.signAndSendTransaction ||
       !isConnected ||
       !address ||
       !connection
@@ -369,10 +376,9 @@ export default function App() {
         transaction.feePayer = new PublicKey(address);
       }
 
-      const signed = await walletProvider.signTransaction(transaction);
-      const signature = await connection.sendRawTransaction(
-        signed.serialize(),
-        params?.options
+      // Use walletProvider.signAndSendTransaction directly
+      const { signature } = await walletProvider.signAndSendTransaction(
+        transaction
       );
 
       setLastSignature(signature);
@@ -629,6 +635,70 @@ export default function App() {
     }
   };
 
+  // Add this new function for v0 transactions
+  const signAndSendV0Transaction = async () => {
+    if (
+      !walletProvider?.signAndSendTransaction ||
+      !isConnected ||
+      !address ||
+      !connection
+    )
+      return;
+    setLoadingState("signAndSendV0Transaction", true);
+    try {
+      const payer = new PublicKey(address);
+
+      // Create a simple transfer instruction
+      const transferInstruction = SystemProgram.transfer({
+        fromPubkey: payer,
+        toPubkey: payer, // Sending to self as example
+        lamports: 100,
+      });
+
+      // Get latest blockhash
+      const { blockhash } = await connection.getLatestBlockhash();
+
+      // Create a message
+      const message = new TransactionMessage({
+        payerKey: payer,
+        recentBlockhash: blockhash,
+        instructions: [transferInstruction],
+      }).compileToV0Message();
+
+      // Create a v0 transaction
+      const transaction = new VersionedTransaction(message);
+
+      // Use signAndSendTransaction directly
+      const { signature } = await walletProvider.signAndSendTransaction(
+        transaction
+      );
+
+      setLastSignature(signature);
+      const confirmationMessage = await waitForConfirmation(
+        connection,
+        signature,
+        "confirmed"
+      );
+
+      setMessage(
+        `V0 Transaction signed and sent!\nTransaction ID: ${signature}\nStatus: ${confirmationMessage}`
+      );
+      await fetchBalance();
+
+      return { signature };
+    } catch (error) {
+      console.error("Error in sign and send v0 transaction:", error);
+      setMessage(
+        `Error in sign and send v0 transaction: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+      throw error;
+    } finally {
+      setLoadingState("signAndSendV0Transaction", false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="p-6 max-w-4xl mx-auto">
@@ -720,6 +790,16 @@ export default function App() {
                   {loading.signAndSendTransaction
                     ? "Processing..."
                     : "Sign & Send Transaction"}
+                </button>
+
+                <button
+                  onClick={signAndSendV0Transaction}
+                  disabled={loading.signAndSendV0Transaction}
+                  className="w-full bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading.signAndSendV0Transaction
+                    ? "Processing..."
+                    : "Sign & Send V0 Transaction"}
                 </button>
 
                 <button
