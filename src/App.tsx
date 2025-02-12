@@ -99,7 +99,7 @@ interface SolanaProvider {
   signAllTransactions: (transactions: Transaction[]) => Promise<Transaction[]>;
   signAndSendTransaction: (
     transaction: Transaction | VersionedTransaction
-  ) => Promise<{ signature: string }>;
+  ) => Promise<string>;
 }
 
 // RPC Method Types
@@ -188,30 +188,35 @@ export default function App() {
     signature: string,
     commitment: SendOptions["preflightCommitment"] = "confirmed"
   ): Promise<string> => {
-    const strategy = {
-      signature: signature,
-      blockhash: (await connection.getLatestBlockhash(commitment)).blockhash,
-      lastValidBlockHeight: (await connection.getLatestBlockhash(commitment))
-        .lastValidBlockHeight,
-    };
+    console.log("waitForConfirmation", signature, commitment);
+    const TIMEOUT = 30000; // 30 seconds
+    const RETRY_INTERVAL = 1000; // 1 second
+    const startTime = Date.now();
 
-    const result = await connection.confirmTransaction(strategy);
-    if (result.value.err) {
-      throw new Error("Transaction failed");
+    while (Date.now() - startTime < TIMEOUT) {
+      const response = await connection.getSignatureStatus(signature);
+      const status = response.value;
+
+      if (status) {
+        if (status.err) {
+          throw new Error(`Transaction failed: ${status.err.toString()}`);
+        }
+
+        if (
+          status.confirmationStatus === commitment ||
+          status.confirmationStatus === "finalized"
+        ) {
+          return status.confirmationStatus;
+        }
+      }
+
+      // Wait before retrying
+      await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL));
     }
-    return commitment;
-  };
 
-  // Wait for multiple confirmations
-  const waitForAllConfirmations = async (
-    connection: Connection,
-    signatures: string[],
-    commitment: SendOptions["preflightCommitment"] = "confirmed"
-  ): Promise<string[]> => {
-    const confirmations = await Promise.all(
-      signatures.map((sig) => waitForConfirmation(connection, sig, commitment))
+    throw new Error(
+      `Transaction confirmation timeout after ${TIMEOUT / 1000} seconds`
     );
-    return confirmations;
   };
 
   // solana_getAccounts
@@ -263,7 +268,7 @@ export default function App() {
       // Use provided message or default
       const messageStr =
         params?.message ||
-        "Hello from Solana AppKit! " + new Date().toISOString();
+        "Hello from Solana Zengo Test! " + new Date().toISOString();
       const encodedMessage = new TextEncoder().encode(messageStr);
       const signature = await walletProvider.signMessage(encodedMessage);
 
@@ -322,6 +327,7 @@ export default function App() {
       }
 
       const signed = await walletProvider.signTransaction(transaction);
+      console.log("signed transaction", signed);
       const serialized = signed.serialize();
 
       setMessage(
@@ -377,9 +383,11 @@ export default function App() {
       }
 
       // Use walletProvider.signAndSendTransaction directly
-      const { signature } = await walletProvider.signAndSendTransaction(
+      const signature = await walletProvider.signAndSendTransaction(
         transaction
       );
+
+      console.log("signature", signature);
 
       setLastSignature(signature);
       const confirmationMessage = await waitForConfirmation(
@@ -441,6 +449,7 @@ export default function App() {
       tx2.feePayer = new PublicKey(address);
 
       const signedTxs = await walletProvider.signAllTransactions([tx1, tx2]);
+      console.log("signedTxs", signedTxs);
       const signatures = signedTxs.map((tx) =>
         tx.signatures[0].signature?.toString("base64")
       );
@@ -460,78 +469,6 @@ export default function App() {
       throw error;
     } finally {
       setLoadingState("signAllTransactions", false);
-    }
-  };
-
-  // solana_signAndSendAllTransactions (extension of RPC methods)
-  const signAndSendAllTransactions = async () => {
-    if (
-      !walletProvider?.signAllTransactions ||
-      !isConnected ||
-      !address ||
-      !connection
-    )
-      return;
-    setLoadingState("signAndSendAllTransactions", true);
-    try {
-      // Create three example transactions
-      const transactions = await Promise.all(
-        [100, 200, 300].map(async (amount) => {
-          const tx = new Transaction().add(
-            SystemProgram.transfer({
-              fromPubkey: new PublicKey(address),
-              toPubkey: new PublicKey(address),
-              lamports: amount,
-            })
-          );
-
-          const latestBlockhash = await connection.getLatestBlockhash();
-          tx.recentBlockhash = latestBlockhash.blockhash;
-          tx.feePayer = new PublicKey(address);
-          return tx;
-        })
-      );
-
-      // Sign all transactions
-      const signedTransactions = await walletProvider.signAllTransactions(
-        transactions
-      );
-
-      // Send all transactions
-      const signatures = await Promise.all(
-        signedTransactions.map((tx) =>
-          connection.sendRawTransaction(tx.serialize())
-        )
-      );
-
-      setLastSignatures(signatures);
-
-      // Wait for all confirmations
-      const confirmations = await waitForAllConfirmations(
-        connection,
-        signatures
-      );
-
-      setMessage(
-        `All transactions sent and confirmed!\n${signatures
-          .map(
-            (sig, i) => `Transaction ${i + 1} ID: ${sig} (${confirmations[i]})`
-          )
-          .join("\n")}`
-      );
-
-      await fetchBalance();
-      return { signatures };
-    } catch (error) {
-      console.error("Error in sign and send all transactions:", error);
-      setMessage(
-        `Error in sign and send all transactions: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
-      );
-      throw error;
-    } finally {
-      setLoadingState("signAndSendAllTransactions", false);
     }
   };
 
@@ -637,6 +574,7 @@ export default function App() {
 
   // Add this new function for v0 transactions
   const signAndSendV0Transaction = async () => {
+    console.log("signAndSendV0Transaction");
     if (
       !walletProvider?.signAndSendTransaction ||
       !isConnected ||
@@ -669,9 +607,11 @@ export default function App() {
       const transaction = new VersionedTransaction(message);
 
       // Use signAndSendTransaction directly
-      const { signature } = await walletProvider.signAndSendTransaction(
+      const signature = await walletProvider.signAndSendTransaction(
         transaction
       );
+
+      console.log("signature", signature);
 
       setLastSignature(signature);
       const confirmationMessage = await waitForConfirmation(
@@ -702,7 +642,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="p-6 max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">Solana RPC Methods Demo</h1>
+        <h1 className="text-3xl font-bold mb-6">
+          Zengo Solana RPC Methods Demo
+        </h1>
 
         <div className="mb-4">
           <div className="flex items-center gap-2">
@@ -810,16 +752,6 @@ export default function App() {
                   {loading.signAllTransactions
                     ? "Signing..."
                     : "Sign Multiple Transactions"}
-                </button>
-
-                <button
-                  onClick={signAndSendAllTransactions}
-                  disabled={loading.signAndSendAllTransactions}
-                  className="w-full bg-orange-500 text-white px-4 py-2 rounded hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed col-span-2"
-                >
-                  {loading.signAndSendAllTransactions
-                    ? "Processing..."
-                    : "Sign & Send Multiple Transactions"}
                 </button>
               </div>
 

@@ -27,5 +27,15 @@ export default defineConfig({
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
+    hmr: {
+      overlay: true,
+    },
+    watch: {
+      usePolling: true,
+    },
+    cors: true,
+    strictPort: true,
+    host: true,
   },
+  logLevel: "info",
 });
