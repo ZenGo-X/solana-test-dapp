@@ -137,7 +137,7 @@ export default function App() {
   const [amount, setAmount] = useState("");
   const [lastSignature, setLastSignature] =
     useState<TransactionSignature | null>(null);
-  const [lastSignatures, setLastSignatures] = useState<string[]>([]);
+  const [lastSignatures] = useState<string[]>([]);
   const [isSignatureValid, setIsSignatureValid] = useState<boolean | null>(
     null
   );
