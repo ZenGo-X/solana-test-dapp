@@ -1,171 +1,132 @@
-# Solana AppKit Demo
+# Zengo Solana WalletConnect Demo dApp
 
-A simple Solana dApp that demonstrates wallet integration using AppKit and WalletConnect. This project showcases wallet connection, transaction signing, and basic Solana operations.
+<p align="center">
+  <img src="src/assets/zengo-logo.svg" alt="ZenGo Solana WalletConnect Demo" width="180"/>
+</p>
+
+## About
+
+This demo dApp was created by [ZenGo](https://zengo.com) while developing Solana support and testing WalletConnect integration. It provides a comprehensive example of how to integrate Solana blockchain functionality with WalletConnect in a React application.
 
 ## Features
 
-- Multiple wallet connection methods:
-  - WalletConnect QR code scanning
-  - Direct wallet connections (Phantom, Solflare)
-  - AppKit modal integration
-- Transaction operations:
-  - Check wallet balance
-  - Sign messages
-  - Send test transactions
-- Support for both Solana mainnet and devnet
-- Full React + TypeScript implementation
+- Connect to Solana wallets using WalletConnect
+- Switch between Devnet and Mainnet environments
+- Sign and send transactions
+- Sign, verify and manage messages
+- SPL Token transfers
+- Balance checking
+- Support for both legacy and versioned transactions
 
 ## Prerequisites
 
-- Node.js (v16 or higher)
-- npm or yarn
-- A modern web browser
-- A Reown Cloud project ID (get it from https://cloud.reown.com)
+- Node.js (v18 or higher recommended)
+- A Solana wallet (Phantom, Solflare, or any WalletConnect compatible wallet)
 
 ## Installation
 
-1. Create a new project using Vite:
+1. Clone the repository:
 
 ```bash
-npm create vite@latest solana-appkit -- --template react-ts
-cd solana-appkit
+git clone https://github.com/zengoX/Solana-dapp.git
+cd Solana-dapp
 ```
 
-2. Install the required dependencies:
+2. Install dependencies:
 
 ```bash
-npm install @reown/appkit \
-            @reown/appkit-adapter-solana \
-            @reown/appkit-wallet-button \
-            @solana/wallet-adapter-wallets \
-            @solana/web3.js
+npm install
 ```
 
-3. Install development dependencies:
-
-```bash
-npm install tailwindcss postcss autoprefixer -D
-```
-
-4. Initialize Tailwind CSS:
-
-```bash
-npx tailwindcss init -p
-```
-
-5. Configure Tailwind CSS by updating `tailwind.config.js`:
-
-```javascript
-/** @type {import('tailwindcss').Config} */
-export default {
-  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
-};
-```
-
-6. Add Tailwind directives to your `./src/index.css`:
-
-```css
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-```
-
-## Configuration
-
-1. Get your project ID from [Reown Cloud](https://cloud.reown.com)
-
-2. Create a `.env` file in the root directory:
-
-```env
-VITE_PROJECT_ID=your_project_id_here
-```
-
-3. Update the project metadata in `App.tsx` with your project details:
-
-```typescript
-const metadata = {
-  name: "Your App Name",
-  description: "Your App Description",
-  url: "http://localhost:3000", // Update with your production URL
-  icons: ["https://your-app-icon.png"],
-};
-```
-
-## Project Structure
+3. Create a `.env` file in the root directory with the following variables:
 
 ```
-solana-appkit/
-├── src/
-│   ├── App.tsx            # Main application component
-│   ├── main.tsx          # Entry point
-│   └── index.css         # Global styles
-├── public/
-├── package.json
-├── tailwind.config.js
-├── tsconfig.json
-├── vite.config.ts
-└── README.md
+VITE_PROJECT_ID=your_project_id
+VITE_APP_URL=http://localhost:5173
+VITE_DEFAULT_NETWORK=devnet # or mainnet
+VITE_RPC_URL_DEVNET=https://api.devnet.solana.com
+VITE_RPC_URL_MAINNET=https://api.mainnet-beta.solana.com
 ```
 
-## Running the Project
+Note: You'll need to obtain a `VITE_PROJECT_ID` from [WalletConnect Cloud](https://cloud.walletconnect.com/sign-in) for your own deployment.
 
-1. Start the development server:
+## Development
+
+Start the development server:
 
 ```bash
 npm run dev
 ```
 
-2. Open your browser and navigate to `http://localhost:5173`
+This will start the application on `http://localhost:5173` (or another port if 5173 is already in use).
 
 ## Building for Production
 
-1. Create a production build:
+To build the application for production:
 
 ```bash
 npm run build
 ```
 
-2. Preview the production build:
-
-```bash
-npm run preview
-```
+The built files will be in the `dist` directory and can be served by any static file server.
 
 ## Usage
 
-1. Connect your wallet using any of the available methods:
+1. **Connect Your Wallet**: Use the "Connect Wallet" button to connect via WalletConnect or directly through wallet extensions.
 
-   - Click "Connect with WalletConnect QR" to scan a QR code
-   - Use the direct wallet buttons for Phantom or Solflare
-   - Use the AppKit modal for additional options
+2. **View Account Information**: Once connected, you can see your account address and balance.
 
-2. Once connected, you can:
-   - Check your wallet balance
-   - Sign messages
-   - Send test transactions
+3. **Perform Operations**:
 
-## Support
+   - Sign messages and verify signatures
+   - Create and sign transactions
+   - Send SOL to other addresses
+   - Send SPL tokens
+   - Sign multiple transactions at once
+   - Execute versioned transactions (v0)
 
-- For AppKit issues: [AppKit Documentation](https://docs.reown.com/appkit)
-- For Solana development: [Solana Documentation](https://docs.solana.com)
-- For WalletConnect: [WalletConnect Documentation](https://docs.walletconnect.com)
+4. **Switch Networks**: The application supports both Devnet and Mainnet environments. The default is determined by your `.env` configuration.
+
+## Project Structure
+
+- `src/App.tsx`: Main application component with all wallet functionality
+- `src/main.tsx`: Application entry point
+- `src/assets/`: Logos and images
+- Environment configuration is handled through `.env` file
+
+## Customization
+
+You can customize the application by:
+
+1. Modifying the `.env` file to change network defaults
+2. Adding more wallet adapters in the `solanaAdapter` configuration
+3. Extending the App.tsx file with additional Solana functionality
+4. Updating the UI and branding in the components
 
 ## Contributing
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License
 
-## Security
+Copyright (c) 2025 ZenGo
 
-Remember to never commit your project ID or other sensitive information. Always use environment variables for sensitive data.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
