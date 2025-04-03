@@ -32,6 +32,8 @@ import {
 } from "@solana/spl-token";
 import { verify, etc } from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha512";
+import logoPath from "./assets/zengo-logo.svg";
+import customLogoPath from "./assets/logo.svg";
 
 // Set up SHA-512 for ed25519
 etc.sha512Sync = (...m) => sha512(etc.concatBytes(...m));
@@ -123,7 +125,6 @@ interface SignAndSendTransactionParams {
 }
 
 export default function App() {
-  // 1. First, declare all hooks
   const { address, isConnected } = useAppKitAccount();
   const { disconnect } = useDisconnect();
   const { walletProvider } = useAppKitProvider<SolanaProvider>("solana");
@@ -140,6 +141,9 @@ export default function App() {
   const [isSignatureValid, setIsSignatureValid] = useState<boolean | null>(
     null
   );
+  const [showTransactionExplorer, setShowTransactionExplorer] =
+    useState<boolean>(false);
+
   const [loading, setLoading] = useState<LoadingState>({
     getAccounts: false,
     requestAccounts: false,
@@ -154,7 +158,6 @@ export default function App() {
     signAndSendV0Transaction: false,
   });
 
-  // Add debug logging
   useEffect(() => {
     console.log("Connection status:", {
       hasConnection: !!connection,
@@ -169,17 +172,22 @@ export default function App() {
     }
   }, [isDevnet, tokenAddress]);
 
-  // if (!connection) {
-  //   return (
-  //     <div className="min-h-screen bg-gray-50 text-gray-900 p-6">
-  //       <h1 className="text-3xl font-bold mb-6">Initializing connection...</h1>
-  //       <appkit-button />
-  //     </div>
-  //   );
-  // }
-
   // Helper functions
+  const startNewAction = () => {
+    // Only reset the signature validation status, not the transaction explorer
+    setIsSignatureValid(null);
+  };
+
+  // Helper to hide Transaction Explorer for non-transaction methods
+  const hideTransactionExplorer = () => {
+    setShowTransactionExplorer(false);
+  };
+
   const setLoadingState = (key: keyof LoadingState, value: boolean) => {
+    if (value) {
+      // If we're starting a new action, reset the relevant UI state
+      startNewAction();
+    }
     setLoading((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -226,6 +234,8 @@ export default function App() {
     try {
       const accounts = [walletProvider.publicKey.toString()];
       setMessage(`Available accounts: ${JSON.stringify(accounts)}`);
+      // Hide transaction explorer for this action
+      hideTransactionExplorer();
       return accounts;
     } catch (error) {
       console.error("Error getting accounts:", error);
@@ -246,6 +256,8 @@ export default function App() {
     try {
       const accounts = await getAccounts();
       setMessage(`Requested accounts: ${JSON.stringify(accounts)}`);
+      // Hide transaction explorer for this action
+      hideTransactionExplorer();
       return accounts;
     } catch (error) {
       console.error("Error requesting accounts:", error);
@@ -284,6 +296,8 @@ export default function App() {
       setMessage(
         `Message signed and verified!\nSignature: ${signatureHex}\nValid: ${isValid}`
       );
+      // Hide transaction explorer for this action
+      hideTransactionExplorer();
       return { signature: signatureHex };
     } catch (error) {
       console.error("Error signing message:", error);
@@ -333,6 +347,8 @@ export default function App() {
       setMessage(
         `Transaction signed! Serialized: ${serialized.toString("base64")}`
       );
+      // Hide transaction explorer for this action
+      hideTransactionExplorer();
       return { signature: signed.signatures[0].signature?.toString("base64") };
     } catch (error) {
       console.error("Error signing transaction:", error);
@@ -389,7 +405,11 @@ export default function App() {
 
       console.log("signature", signature);
 
+      // Update the UI to show transaction info
       setLastSignature(signature);
+      // Explicitly show transaction explorer for transaction operations
+      setShowTransactionExplorer(true);
+
       const confirmationMessage = await waitForConfirmation(
         connection,
         signature,
@@ -475,7 +495,8 @@ export default function App() {
   // Fetch balance
   const fetchBalance = async () => {
     if (!address || !connection) return;
-    setLoadingState("fetchBalance", true);
+    // Use direct setting of loading state to avoid affecting transaction explorer
+    setLoading((prev) => ({ ...prev, fetchBalance: true }));
     try {
       const balance = await connection.getBalance(new PublicKey(address));
       setBalance(balance / LAMPORTS_PER_SOL);
@@ -487,7 +508,8 @@ export default function App() {
         }`
       );
     } finally {
-      setLoadingState("fetchBalance", false);
+      // Restore the loading state without affecting the transaction explorer display
+      setLoading((prev) => ({ ...prev, fetchBalance: false }));
     }
   };
 
@@ -552,7 +574,11 @@ export default function App() {
       const signed = await walletProvider.signTransaction(transaction);
       const signature = await connection.sendRawTransaction(signed.serialize());
 
+      // Update the UI to show transaction info
       setLastSignature(signature);
+      // Explicitly show transaction explorer for transaction operations
+      setShowTransactionExplorer(true);
+
       const confirmationMessage = await waitForConfirmation(
         connection,
         signature
@@ -613,7 +639,11 @@ export default function App() {
 
       console.log("signature", signature);
 
+      // Update the UI to show transaction info
       setLastSignature(signature);
+      // Explicitly show transaction explorer for transaction operations
+      setShowTransactionExplorer(true);
+
       const confirmationMessage = await waitForConfirmation(
         connection,
         signature,
@@ -640,224 +670,440 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="p-6 max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">
-          Zengo Solana RPC Methods Demo
-        </h1>
-
-        <div className="mb-4">
-          <div className="flex items-center gap-2">
-            <span className="font-medium">Network:</span>
-            <span className={`px-4 py-2 rounded bg-yellow-500 text-white`}>
-              {isDevnet ? "Devnet" : "Mainnet"}
-            </span>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      <header className="bg-white shadow-sm py-4 px-6 border-b border-slate-200">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <img
+            src={logoPath}
+            alt="ZenGo Solana Wallet Connect Demo"
+            className="h-10"
+          />
+          <div className="flex items-center gap-4">
+            {isConnected && (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-sm text-slate-600">
+                    Network:
+                  </span>
+                  <span
+                    className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                      isDevnet
+                        ? "bg-amber-100 text-amber-800"
+                        : "bg-emerald-100 text-emerald-800"
+                    }`}
+                  >
+                    {isDevnet ? "Devnet" : "Mainnet"}
+                  </span>
+                </div>
+                {balance !== null && (
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm text-slate-600">
+                      Balance:
+                    </span>
+                    <span className="font-bold text-sm">{balance} SOL</span>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
+      </header>
 
-        {!isConnected && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div className="col-span-full">
-              <appkit-button />
+      <main className="max-w-6xl mx-auto py-8 px-6">
+        {!isConnected ? (
+          <div className="flex flex-col items-center justify-center min-h-[70vh]">
+            <div className="max-w-md w-full bg-white shadow-xl rounded-2xl p-8 text-center bg-gradient-to-br from-white to-purple-50">
+              <img
+                src={customLogoPath}
+                alt="ZenGo Solana Wallet Connect Demo"
+                className="h-24 mx-auto mb-8 animate-fadeIn"
+              />
+              {/* <h1 className="text-2xl font-bold mb-4 text-slate-800">
+                Solana Wallet Connect
+              </h1> */}
+              <p className="mb-8 text-slate-600">
+                Connect your wallet to experience the power of Solana blockchain
+              </p>
+              <div className="inline-block">
+                <appkit-button />
+              </div>
             </div>
           </div>
-        )}
-
-        {isConnected && (
-          <div className="space-y-6">
-            <div className="bg-white shadow rounded-lg p-6">
-              <h2 className="font-bold mb-2">Connected Account</h2>
-              <p className="break-all font-mono text-sm">{address}</p>
-              <div className="flex gap-2 mt-2">
-                <button
-                  onClick={fetchBalance}
-                  disabled={loading.fetchBalance}
-                  className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading.fetchBalance ? "Fetching..." : "Fetch Balance"}
-                </button>
-                <button
-                  onClick={disconnect}
-                  className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
-                >
-                  Disconnect
-                </button>
+        ) : (
+          <div className="space-y-8">
+            <div className="bg-white shadow-md rounded-xl p-6 border border-slate-100">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="font-semibold text-lg mb-1">
+                    Connected Account
+                  </h2>
+                  <p className="break-all font-mono text-sm bg-slate-50 p-2 rounded border border-slate-200">
+                    {address}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={fetchBalance}
+                    disabled={loading.fetchBalance}
+                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {loading.fetchBalance ? (
+                      <>
+                        <svg
+                          className="animate-spin h-4 w-4 text-white"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
+                        <span>Fetching...</span>
+                      </>
+                    ) : (
+                      "Refresh Balance"
+                    )}
+                  </button>
+                  <button
+                    onClick={disconnect}
+                    className="bg-slate-200 text-slate-800 px-4 py-2 rounded-lg hover:bg-slate-300 transition-colors"
+                  >
+                    Disconnect
+                  </button>
+                </div>
               </div>
-              {balance !== null && (
-                <p className="mt-2 font-bold">Balance: {balance} SOL</p>
-              )}
             </div>
 
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button
-                  onClick={getAccounts}
-                  disabled={loading.getAccounts}
-                  className="w-full bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading.getAccounts ? "Getting Accounts..." : "Get Accounts"}
-                </button>
-
-                <button
-                  onClick={requestAccounts}
-                  disabled={loading.requestAccounts}
-                  className="w-full bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading.requestAccounts
-                    ? "Requesting..."
-                    : "Request Accounts"}
-                </button>
-
-                <button
-                  onClick={() => signMessage()}
-                  disabled={loading.signMessage}
-                  className="w-full bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading.signMessage ? "Signing..." : "Sign Message"}
-                </button>
-
-                <button
-                  onClick={() => signTransaction()}
-                  disabled={loading.signTransaction}
-                  className="w-full bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading.signTransaction ? "Signing..." : "Sign Transaction"}
-                </button>
-
-                <button
-                  onClick={() => signAndSendTransaction()}
-                  disabled={loading.signAndSendTransaction}
-                  className="w-full bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading.signAndSendTransaction
-                    ? "Processing..."
-                    : "Sign & Send Transaction"}
-                </button>
-
-                <button
-                  onClick={signAndSendV0Transaction}
-                  disabled={loading.signAndSendV0Transaction}
-                  className="w-full bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading.signAndSendV0Transaction
-                    ? "Processing..."
-                    : "Sign & Send V0 Transaction"}
-                </button>
-
-                <button
-                  onClick={signAllTransactions}
-                  disabled={loading.signAllTransactions}
-                  className="w-full bg-orange-500 text-white px-4 py-2 rounded hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading.signAllTransactions
-                    ? "Signing..."
-                    : "Sign Multiple Transactions"}
-                </button>
-              </div>
-
-              {/* SPL Token Transfer Form */}
-              <div className="bg-white shadow rounded-lg p-6">
-                <h3 className="font-bold mb-4">Send SPL Token</h3>
-                <div className="space-y-3">
-                  <input
-                    type="text"
-                    placeholder="Token Mint Address"
-                    value={tokenAddress}
-                    onChange={(e) => setTokenAddress(e.target.value)}
-                    className="w-full p-2 border rounded"
-                    disabled={loading.sendToken}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Recipient Address"
-                    value={recipientAddress}
-                    onChange={(e) => setRecipientAddress(e.target.value)}
-                    className="w-full p-2 border rounded"
-                    disabled={loading.sendToken}
-                  />
-                  <input
-                    type="number"
-                    placeholder="Amount"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-full p-2 border rounded"
-                    disabled={loading.sendToken}
-                  />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white shadow-md rounded-xl p-6 border border-slate-100">
+                <h3 className="font-semibold text-lg mb-4 text-slate-800">
+                  Account Methods
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <button
-                    onClick={sendSPLToken}
-                    disabled={loading.sendToken}
-                    className="w-full bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={getAccounts}
+                    disabled={loading.getAccounts}
+                    className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {loading.sendToken ? "Sending Token..." : "Send SPL Token"}
+                    {loading.getAccounts
+                      ? "Getting Accounts..."
+                      : "Get Accounts"}
+                  </button>
+
+                  <button
+                    onClick={requestAccounts}
+                    disabled={loading.requestAccounts}
+                    className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading.requestAccounts
+                      ? "Requesting..."
+                      : "Request Accounts"}
                   </button>
                 </div>
               </div>
 
-              {message && (
-                <div className="bg-white shadow rounded-lg p-6">
-                  <h3 className="font-bold mb-2">Latest Action</h3>
-                  <div className="space-y-2">
-                    <p className="break-all font-mono text-sm whitespace-pre-wrap">
-                      {message}
-                    </p>
+              <div className="bg-white shadow-md rounded-xl p-6 border border-slate-100">
+                <h3 className="font-semibold text-lg mb-4 text-slate-800">
+                  Signing Methods
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <button
+                    onClick={() => signMessage()}
+                    disabled={loading.signMessage}
+                    className="w-full bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading.signMessage ? "Signing..." : "Sign Message"}
+                  </button>
 
+                  <button
+                    onClick={() => signTransaction()}
+                    disabled={loading.signTransaction}
+                    className="w-full bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading.signTransaction
+                      ? "Signing..."
+                      : "Sign Transaction"}
+                  </button>
+
+                  <button
+                    onClick={signAllTransactions}
+                    disabled={loading.signAllTransactions}
+                    className="w-full bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed col-span-2"
+                  >
+                    {loading.signAllTransactions
+                      ? "Signing..."
+                      : "Sign Multiple Transactions"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white shadow-md rounded-xl p-6 border border-slate-100">
+                <h3 className="font-semibold text-lg mb-4 text-slate-800">
+                  Transaction Methods
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <button
+                    onClick={() => signAndSendTransaction()}
+                    disabled={loading.signAndSendTransaction}
+                    className="w-full bg-purple-600 text-white px-4 py-3 rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading.signAndSendTransaction
+                      ? "Processing..."
+                      : "Sign & Send Transaction"}
+                  </button>
+
+                  <button
+                    onClick={signAndSendV0Transaction}
+                    disabled={loading.signAndSendV0Transaction}
+                    className="w-full bg-purple-600 text-white px-4 py-3 rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading.signAndSendV0Transaction
+                      ? "Processing..."
+                      : "Sign & Send V0 Transaction"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white shadow-md rounded-xl p-6 border border-slate-100">
+                <h3 className="font-semibold text-lg mb-4 text-slate-800">
+                  Send SPL Token
+                </h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Token Mint Address
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Token Mint Address"
+                      value={tokenAddress}
+                      onChange={(e) => setTokenAddress(e.target.value)}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      disabled={loading.sendToken}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Recipient Address
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Recipient Address"
+                      value={recipientAddress}
+                      onChange={(e) => setRecipientAddress(e.target.value)}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      disabled={loading.sendToken}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Amount
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="Amount"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      disabled={loading.sendToken}
+                    />
+                  </div>
+                  <button
+                    onClick={sendSPLToken}
+                    disabled={loading.sendToken}
+                    className="w-full bg-indigo-600 text-white px-4 py-3 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+                  >
+                    {loading.sendToken ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg
+                          className="animate-spin h-4 w-4 text-white"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
+                        Sending Token...
+                      </span>
+                    ) : (
+                      "Send SPL Token"
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Last Action Result */}
+            {message && (
+              <div className="bg-white shadow-lg rounded-xl p-6 border border-slate-100 animate-fadeIn">
+                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2 text-slate-800">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5 text-indigo-600"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  Last Action Result
+                </h3>
+                <div className="rounded-lg bg-slate-50 p-4 border border-slate-200">
+                  <pre className="break-all font-mono text-sm whitespace-pre-wrap text-slate-800">
+                    {message}
+                  </pre>
+                </div>
+
+                {isSignatureValid !== null && (
+                  <div
+                    className={`mt-4 p-3 rounded-lg flex items-center gap-2 ${
+                      isSignatureValid
+                        ? "bg-green-50 text-green-800 border border-green-200"
+                        : "bg-red-50 text-red-800 border border-red-200"
+                    }`}
+                  >
+                    {isSignatureValid ? (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    ) : (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    )}
+                    <span className="font-medium">
+                      Signature is {isSignatureValid ? "valid" : "invalid"}
+                    </span>
+                  </div>
+                )}
+
+                {showTransactionExplorer && (
+                  <>
                     {lastSignatures.length > 0 ? (
-                      <div className="mt-2">
-                        <p className="font-medium">Transaction Explorers:</p>
-                        {lastSignatures.map((sig, index) => (
-                          <a
-                            key={sig}
-                            href={`https://${
-                              isDevnet
-                                ? "explorer.solana.com/?cluster=devnet"
-                                : "explorer.solana.com"
-                            }/tx/${sig}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block text-blue-500 hover:underline break-all mb-1"
-                          >
-                            View Transaction {index + 1} on Solana Explorer
-                          </a>
-                        ))}
+                      <div className="mt-4">
+                        <h4 className="font-medium mb-2 text-slate-700">
+                          Transaction Explorers:
+                        </h4>
+                        <div className="space-y-2">
+                          {lastSignatures.map((sig, index) => (
+                            <a
+                              key={sig}
+                              href={`https://explorer.solana.com/tx/${sig}${
+                                isDevnet ? "?cluster=devnet" : ""
+                              }`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block text-indigo-600 hover:text-indigo-800 hover:underline break-all p-2 bg-indigo-50 rounded-lg border border-indigo-100"
+                            >
+                              <span className="font-medium">
+                                Transaction {index + 1}:{" "}
+                              </span>
+                              <span className="font-mono text-xs">
+                                {sig.slice(0, 20)}...{sig.slice(-20)}
+                              </span>
+                              <span className="ml-2 text-xs bg-indigo-100 px-2 py-1 rounded-full">
+                                View on Explorer
+                              </span>
+                            </a>
+                          ))}
+                        </div>
                       </div>
                     ) : (
                       lastSignature && (
-                        <div className="mt-2">
-                          <p className="font-medium">Transaction Explorer:</p>
+                        <div className="mt-4">
+                          <h4 className="font-medium mb-2 text-slate-700">
+                            Transaction Explorer:
+                          </h4>
                           <a
-                            href={`https://${
-                              isDevnet
-                                ? "explorer.solana.com/?cluster=devnet"
-                                : "explorer.solana.com"
-                            }/tx/${lastSignature}`}
+                            href={`https://explorer.solana.com/tx/${lastSignature}${
+                              isDevnet ? "?cluster=devnet" : ""
+                            }`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-blue-500 hover:underline break-all"
+                            className="flex items-center justify-between text-indigo-600 hover:text-indigo-800 hover:bg-indigo-100 break-all p-3 bg-indigo-50 rounded-lg border border-indigo-100 transition-colors"
                           >
-                            View on Solana Explorer
+                            <span className="font-mono text-xs">
+                              {lastSignature.slice(0, 20)}...
+                              {lastSignature.slice(-20)}
+                            </span>
+                            <span className="ml-2 text-xs bg-indigo-100 px-2 py-1 rounded-full flex items-center gap-1">
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                className="h-4 w-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                                />
+                              </svg>
+                              View on Explorer
+                            </span>
                           </a>
                         </div>
                       )
                     )}
-
-                    {isSignatureValid !== null && (
-                      <div
-                        className={`mt-2 p-2 rounded ${
-                          isSignatureValid
-                            ? "bg-green-100 text-green-800"
-                            : "bg-red-100 text-red-800"
-                        }`}
-                      >
-                        Signature is {isSignatureValid ? "valid" : "invalid"}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
-      </div>
+      </main>
+
+      <footer className="mt-12 py-6 border-t border-slate-200">
+        <div className="max-w-6xl mx-auto px-6 text-center text-slate-500 text-sm">
+          ZenGo Solana Wallet Connect Demo • All rights reserved
+        </div>
+      </footer>
     </div>
   );
 }

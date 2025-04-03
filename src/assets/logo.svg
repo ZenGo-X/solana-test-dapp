@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="240" height="60" viewBox="0 0 240 60" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gradient background for the logo -->
+  <defs>
+    <linearGradient id="solanaGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9945FF" />
+      <stop offset="100%" stop-color="#14F195" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Rounded rectangle background -->
+  <rect x="5" y="10" width="230" height="40" rx="20" fill="url(#solanaGradient)" opacity="0.1" />
+  
+  <!-- Solana inspired icon -->
+  <g transform="translate(20, 15)">
+    <path d="M0,10 L30,10 L25,20 L0,20 Z" fill="#9945FF" />
+    <path d="M5,0 L35,0 L30,10 L0,10 Z" fill="#14F195" />
+    <path d="M0,20 L25,20 L20,30 L0,30 Z" fill="#03E1FF" />
+  </g>
+  
+  <!-- Zengo Solana Text -->
+  <text x="70" y="30" font-family="Arial, sans-serif" font-weight="700" font-size="18" fill="#232323">
+    ZENGO SOLANA
+  </text>
+  <text x="70" y="45" font-family="Arial, sans-serif" font-weight="400" font-size="12" fill="#666666">
+   Wallet Connect Demo
+  </text>
+</svg> 

@@ -22,3 +22,19 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Rust specific
+/target/
+**/*.rs.bk
+Cargo.lock
+debug/
+**/*.pdb
+
+# Solana specific
+.anchor
+.DS_Store
+target
+**/*.rs.bk
+node_modules
+test-ledger
+.yarn
