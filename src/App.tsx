@@ -11,7 +11,7 @@ import {
   useAppKitProvider,
   useDisconnect,
 } from "@reown/appkit/react";
-import { useAppKitConnection } from "@reown/appkit-adapter-solana/react";
+// import { useAppKitConnection } from "@reown/appkit-adapter-solana/react";
 import {
   SystemProgram,
   PublicKey,
@@ -157,7 +157,7 @@ export default function App() {
   const { address, isConnected } = useAppKitAccount();
   const { disconnect } = useDisconnect();
   const { walletProvider } = useAppKitProvider<SolanaProvider>("solana");
-  const { connection } = useAppKitConnection();
+  // const { connection } = useAppKitConnection();
 
   // Network selection state
   const [networkSelection, setNetworkSelection] = useState(
