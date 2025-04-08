@@ -42,7 +42,15 @@ etc.sha512Sync = (...m) => sha512(etc.concatBytes(...m));
 const DEVNET_USDT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const DEFAULT_NETWORK = import.meta.env.VITE_DEFAULT_NETWORK || "devnet";
 const projectId = import.meta.env.VITE_PROJECT_ID;
-const DEVNET_RPC_URL = import.meta.env.VITE_RPC_URL_DEVNET;
+const DEVNET_RPC_URL =
+  import.meta.env.VITE_RPC_URL_DEVNET || "https://api.devnet.solana.com";
+const MAINNET_RPC_URL =
+  import.meta.env.VITE_RPC_URL_MAINNET || "https://solana-rpc.publicnode.com";
+
+// Log available RPC endpoints
+console.log(
+  `RPC Endpoints - Devnet: ${DEVNET_RPC_URL}, Mainnet: ${MAINNET_RPC_URL}`
+);
 
 if (!projectId) {
   throw new Error("Missing VITE_PROJECT_ID in .env file");
@@ -52,33 +60,54 @@ if (!DEVNET_RPC_URL) {
   throw new Error("Missing VITE_RPC_URL_DEVNET in .env file");
 }
 
-// Initialize Solana adapter with wallets
-const solanaAdapter = new SolanaAdapter({
-  wallets: [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
-  connectionSettings: {
-    commitment: "confirmed",
-    wsEndpoint: DEVNET_RPC_URL,
-  },
-});
+// Initialize AppKit and adapter dynamically based on user selection
+let solanaAdapter = null;
+let appKit = null;
 
-const metadata = {
-  name: "Solana Zengo Test",
-  description: "AppKit Example",
-  url: import.meta.env.VITE_APP_URL || "http://localhost:5173",
-  icons: ["https://assets.reown.com/reown-profile-pic.png"],
-};
+function initializeAppKit(network: any) {
+  const isDevnetNetwork = network === "devnet";
+  const rpcEndpoint = isDevnetNetwork ? DEVNET_RPC_URL : MAINNET_RPC_URL;
 
-// Create AppKit instance
-createAppKit({
-  adapters: [solanaAdapter],
-  networks: [solanaDevnet, solana],
-  defaultNetwork: DEFAULT_NETWORK === "devnet" ? solanaDevnet : solana,
-  metadata,
-  projectId,
-  features: {
-    analytics: true,
-  },
-});
+  // Initialize Solana adapter with wallets
+  solanaAdapter = new SolanaAdapter({
+    wallets: [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
+    connectionSettings: {
+      commitment: "confirmed",
+      wsEndpoint: rpcEndpoint,
+    },
+  });
+
+  const metadata = {
+    name: "Solana Test Dapp",
+    description: "Made with ❤️ by Zengo",
+    url: import.meta.env.VITE_APP_URL || "http://localhost:5173",
+    icons: [
+      "https://pbs.twimg.com/profile_images/1673305749236137984/Q5rRdqca_400x400.jpg",
+    ],
+  };
+
+  // Create AppKit instance with just the selected network
+  appKit = createAppKit({
+    adapters: [solanaAdapter],
+    networks: [isDevnetNetwork ? solanaDevnet : solana], // Only use the selected network
+    defaultNetwork: isDevnetNetwork ? solanaDevnet : solana,
+    metadata,
+    projectId,
+    features: {
+      analytics: true,
+    },
+  });
+
+  console.log(
+    `Initialized AppKit with ${
+      isDevnetNetwork ? "devnet" : "mainnet"
+    } network using endpoint: ${rpcEndpoint}`
+  );
+  return appKit;
+}
+
+// Initialize with the default network
+initializeAppKit(DEFAULT_NETWORK);
 
 interface LoadingState {
   getAccounts: boolean;
@@ -129,9 +158,25 @@ export default function App() {
   const { disconnect } = useDisconnect();
   const { walletProvider } = useAppKitProvider<SolanaProvider>("solana");
   const { connection } = useAppKitConnection();
-  const [isDevnet] = useState(DEFAULT_NETWORK === "devnet");
+
+  // Network selection state
+  const [networkSelection, setNetworkSelection] = useState(
+    localStorage.getItem("networkSelection") || DEFAULT_NETWORK
+  );
+  const [isDevnet, setIsDevnet] = useState(networkSelection === "devnet");
+
+  // Create a direct connection to Solana network
+  const [directConnection, setDirectConnection] = useState<Connection | null>(
+    null
+  );
+
   const [balance, setBalance] = useState<number | null>(null);
   const [message, setMessage] = useState("");
+
+  // Custom message state
+  const [customMessage, setCustomMessage] = useState("");
+  const [showCustomMessageInput, setShowCustomMessageInput] = useState(false);
+
   const [tokenAddress, setTokenAddress] = useState("");
   const [recipientAddress, setRecipientAddress] = useState("");
   const [amount, setAmount] = useState("");
@@ -158,12 +203,35 @@ export default function App() {
     signAndSendV0Transaction: false,
   });
 
+  // Effect to handle network selection changes
   useEffect(() => {
-    console.log("Connection status:", {
-      hasConnection: !!connection,
-      connectionDetails: connection,
-    });
-  }, [connection]);
+    if (!isConnected) {
+      setIsDevnet(networkSelection === "devnet");
+      localStorage.setItem("networkSelection", networkSelection);
+
+      // Reinitialize AppKit with the new network
+      console.log(`Switching to network: ${networkSelection}`);
+      initializeAppKit(networkSelection);
+    }
+  }, [networkSelection, isConnected]);
+
+  // Initialize direct connection when network changes
+  useEffect(() => {
+    // Create a direct connection to the correct RPC endpoint
+    const rpcUrl = isDevnet ? DEVNET_RPC_URL : MAINNET_RPC_URL;
+    const newConnection = new Connection(rpcUrl, "confirmed");
+    setDirectConnection(newConnection);
+    console.log(
+      `Created direct connection to ${
+        isDevnet ? "devnet" : "mainnet"
+      } at ${rpcUrl}`
+    );
+
+    // Update balance if address is available
+    if (address) {
+      fetchBalanceDirectly(address, newConnection);
+    }
+  }, [isDevnet, address]);
 
   // Move this check after all hooks
   useEffect(() => {
@@ -277,9 +345,10 @@ export default function App() {
     if (!walletProvider?.signMessage || !isConnected) return;
     setLoadingState("signMessage", true);
     try {
-      // Use provided message or default
+      // Use provided message, custom message, or default
       const messageStr =
         params?.message ||
+        customMessage ||
         "Hello from Solana Zengo Test! " + new Date().toISOString();
       const encodedMessage = new TextEncoder().encode(messageStr);
       const signature = await walletProvider.signMessage(encodedMessage);
@@ -294,7 +363,7 @@ export default function App() {
       setIsSignatureValid(isValid);
       const signatureHex = Buffer.from(signature).toString("hex");
       setMessage(
-        `Message signed and verified!\nSignature: ${signatureHex}\nValid: ${isValid}`
+        `Message signed and verified!\nMessage: ${messageStr}\nSignature: ${signatureHex}\nValid: ${isValid}`
       );
       // Hide transaction explorer for this action
       hideTransactionExplorer();
@@ -335,8 +404,10 @@ export default function App() {
           })
         );
 
-        const latestBlockhash = await connection!.getLatestBlockhash();
-        transaction.recentBlockhash = latestBlockhash.blockhash;
+        if (directConnection) {
+          const latestBlockhash = await directConnection.getLatestBlockhash();
+          transaction.recentBlockhash = latestBlockhash.blockhash;
+        }
         transaction.feePayer = new PublicKey(address);
       }
 
@@ -368,10 +439,10 @@ export default function App() {
     params?: SignAndSendTransactionParams
   ) => {
     if (
-      !walletProvider?.signAndSendTransaction ||
+      !walletProvider?.signTransaction ||
       !isConnected ||
       !address ||
-      !connection
+      !directConnection
     )
       return;
     setLoadingState("signAndSendTransaction", true);
@@ -393,17 +464,19 @@ export default function App() {
           })
         );
 
-        const latestBlockhash = await connection.getLatestBlockhash();
+        const latestBlockhash = await directConnection.getLatestBlockhash();
         transaction.recentBlockhash = latestBlockhash.blockhash;
         transaction.feePayer = new PublicKey(address);
       }
 
-      // Use walletProvider.signAndSendTransaction directly
-      const signature = await walletProvider.signAndSendTransaction(
-        transaction
+      // Sign transaction
+      const signed = await walletProvider.signTransaction(transaction);
+      // Send it using our direct connection
+      const signature = await directConnection.sendRawTransaction(
+        signed.serialize()
       );
 
-      console.log("signature", signature);
+      console.log("Sent transaction with signature:", signature);
 
       // Update the UI to show transaction info
       setLastSignature(signature);
@@ -411,7 +484,7 @@ export default function App() {
       setShowTransactionExplorer(true);
 
       const confirmationMessage = await waitForConfirmation(
-        connection,
+        directConnection,
         signature,
         params?.options?.preflightCommitment
       );
@@ -437,12 +510,7 @@ export default function App() {
 
   // solana_signAllTransactions
   const signAllTransactions = async () => {
-    if (
-      !walletProvider?.signAllTransactions ||
-      !isConnected ||
-      !address ||
-      !connection
-    )
+    if (!walletProvider?.signAllTransactions || !isConnected || !address)
       return;
     setLoadingState("signAllTransactions", true);
     try {
@@ -462,11 +530,13 @@ export default function App() {
         })
       );
 
-      const latestBlockhash = await connection.getLatestBlockhash();
-      tx1.recentBlockhash = latestBlockhash.blockhash;
-      tx1.feePayer = new PublicKey(address);
-      tx2.recentBlockhash = latestBlockhash.blockhash;
-      tx2.feePayer = new PublicKey(address);
+      if (directConnection) {
+        const latestBlockhash = await directConnection.getLatestBlockhash();
+        tx1.recentBlockhash = latestBlockhash.blockhash;
+        tx1.feePayer = new PublicKey(address);
+        tx2.recentBlockhash = latestBlockhash.blockhash;
+        tx2.feePayer = new PublicKey(address);
+      }
 
       const signedTxs = await walletProvider.signAllTransactions([tx1, tx2]);
       console.log("signedTxs", signedTxs);
@@ -492,14 +562,33 @@ export default function App() {
     }
   };
 
-  // Fetch balance
+  // Fetch balance using direct connection
+  const fetchBalanceDirectly = async (
+    walletAddress: string,
+    conn: Connection
+  ) => {
+    try {
+      const balance = await conn.getBalance(new PublicKey(walletAddress));
+      setBalance(balance / LAMPORTS_PER_SOL);
+      console.log(
+        `Successfully fetched balance directly: ${
+          balance / LAMPORTS_PER_SOL
+        } SOL`
+      );
+      return balance / LAMPORTS_PER_SOL;
+    } catch (error) {
+      console.error("Error fetching balance directly:", error);
+      return null;
+    }
+  };
+
+  // Fetch balance - public function that uses the direct connection
   const fetchBalance = async () => {
-    if (!address || !connection) return;
+    if (!address || !directConnection) return;
     // Use direct setting of loading state to avoid affecting transaction explorer
     setLoading((prev) => ({ ...prev, fetchBalance: true }));
     try {
-      const balance = await connection.getBalance(new PublicKey(address));
-      setBalance(balance / LAMPORTS_PER_SOL);
+      await fetchBalanceDirectly(address, directConnection);
     } catch (error) {
       console.error("Error fetching balance:", error);
       setMessage(
@@ -519,7 +608,7 @@ export default function App() {
       !walletProvider?.signTransaction ||
       !isConnected ||
       !address ||
-      !connection
+      !directConnection
     )
       return;
     setLoadingState("sendToken", true);
@@ -529,7 +618,7 @@ export default function App() {
       const recipient = new PublicKey(recipientAddress);
 
       // Get mint info to fetch decimals
-      const mintInfo = await connection.getParsedAccountInfo(mint);
+      const mintInfo = await directConnection.getParsedAccountInfo(mint);
       if (
         !mintInfo.value ||
         !mintInfo.value.data ||
@@ -544,7 +633,9 @@ export default function App() {
 
       const transaction = new Transaction();
 
-      const recipientAccount = await connection.getAccountInfo(recipientATA);
+      const recipientAccount = await directConnection.getAccountInfo(
+        recipientATA
+      );
       if (!recipientAccount) {
         transaction.add(
           createAssociatedTokenAccountInstruction(
@@ -567,12 +658,14 @@ export default function App() {
         )
       );
 
-      const latestBlockhash = await connection.getLatestBlockhash();
+      const latestBlockhash = await directConnection.getLatestBlockhash();
       transaction.recentBlockhash = latestBlockhash.blockhash;
       transaction.feePayer = senderPubkey;
 
       const signed = await walletProvider.signTransaction(transaction);
-      const signature = await connection.sendRawTransaction(signed.serialize());
+      const signature = await directConnection.sendRawTransaction(
+        signed.serialize()
+      );
 
       // Update the UI to show transaction info
       setLastSignature(signature);
@@ -580,7 +673,7 @@ export default function App() {
       setShowTransactionExplorer(true);
 
       const confirmationMessage = await waitForConfirmation(
-        connection,
+        directConnection,
         signature
       );
       setMessage(
@@ -602,10 +695,10 @@ export default function App() {
   const signAndSendV0Transaction = async () => {
     console.log("signAndSendV0Transaction");
     if (
-      !walletProvider?.signAndSendTransaction ||
+      !walletProvider?.signTransaction ||
       !isConnected ||
       !address ||
-      !connection
+      !directConnection
     )
       return;
     setLoadingState("signAndSendV0Transaction", true);
@@ -620,7 +713,7 @@ export default function App() {
       });
 
       // Get latest blockhash
-      const { blockhash } = await connection.getLatestBlockhash();
+      const { blockhash } = await directConnection.getLatestBlockhash();
 
       // Create a message
       const message = new TransactionMessage({
@@ -632,12 +725,14 @@ export default function App() {
       // Create a v0 transaction
       const transaction = new VersionedTransaction(message);
 
-      // Use signAndSendTransaction directly
-      const signature = await walletProvider.signAndSendTransaction(
-        transaction
+      // Sign transaction - we need to handle this differently for versioned transactions
+      const signedTx = await walletProvider.signTransaction(transaction as any);
+      // Send it using our direct connection
+      const signature = await directConnection.sendRawTransaction(
+        signedTx.serialize()
       );
 
-      console.log("signature", signature);
+      console.log("Sent v0 transaction with signature:", signature);
 
       // Update the UI to show transaction info
       setLastSignature(signature);
@@ -645,7 +740,7 @@ export default function App() {
       setShowTransactionExplorer(true);
 
       const confirmationMessage = await waitForConfirmation(
-        connection,
+        directConnection,
         signature,
         "confirmed"
       );
@@ -667,6 +762,11 @@ export default function App() {
     } finally {
       setLoadingState("signAndSendV0Transaction", false);
     }
+  };
+
+  // Toggle custom message input visibility
+  const toggleCustomMessageInput = () => {
+    setShowCustomMessageInput(!showCustomMessageInput);
   };
 
   return (
@@ -718,20 +818,34 @@ export default function App() {
                 alt="ZenGo Solana Wallet Connect Demo"
                 className="h-24 mx-auto mb-8 animate-fadeIn"
               />
-              <p className="mb-8 text-slate-600">Connected Network:</p>
+              <p className="mb-4 text-slate-600">Select Network:</p>
 
-              {/* Network badge - show the current network */}
-              <div className="mb-4 flex justify-center">
-                <span
-                  className={`px-3 py-1 text-sm font-semibold rounded-full ${
-                    isDevnet
-                      ? "bg-amber-100 text-amber-800"
-                      : "bg-emerald-100 text-emerald-800"
-                  }`}
-                >
-                  {isDevnet ? "Devnet" : "Mainnet"}
-                </span>
+              {/* Network selection toggle before login */}
+              <div className="mb-8 flex justify-center">
+                <div className="bg-slate-100 p-1 rounded-lg flex">
+                  <button
+                    onClick={() => setNetworkSelection("devnet")}
+                    className={`px-4 py-2 rounded-md transition-colors ${
+                      networkSelection === "devnet"
+                        ? "bg-amber-500 text-white"
+                        : "text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    Devnet
+                  </button>
+                  <button
+                    onClick={() => setNetworkSelection("mainnet")}
+                    className={`px-4 py-2 rounded-md transition-colors ${
+                      networkSelection === "mainnet"
+                        ? "bg-emerald-500 text-white"
+                        : "text-slate-700 hover:bg-slate-200"
+                    }`}
+                  >
+                    Mainnet
+                  </button>
+                </div>
               </div>
+
               <div className="inline-block">
                 <appkit-button />
               </div>
@@ -822,9 +936,34 @@ export default function App() {
               </div>
 
               <div className="bg-white shadow-md rounded-xl p-6 border border-slate-100">
-                <h3 className="font-semibold text-lg mb-4 text-slate-800">
-                  Signing Methods
+                <h3 className="font-semibold text-lg mb-4 text-slate-800 flex justify-between items-center">
+                  <span>Signing Methods</span>
+                  <button
+                    onClick={toggleCustomMessageInput}
+                    className="text-sm bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg hover:bg-indigo-200 transition-colors"
+                  >
+                    {showCustomMessageInput
+                      ? "Hide Custom Message"
+                      : "Custom Message"}
+                  </button>
                 </h3>
+
+                {/* Custom Message Input */}
+                {showCustomMessageInput && (
+                  <div className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Custom Message to Sign
+                    </label>
+                    <textarea
+                      placeholder="Enter your message here..."
+                      value={customMessage}
+                      onChange={(e) => setCustomMessage(e.target.value)}
+                      className="w-full p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-2"
+                      rows={3}
+                    />
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <button
                     onClick={() => signMessage()}
@@ -1109,7 +1248,16 @@ export default function App() {
 
       <footer className="mt-12 py-6 border-t border-slate-200">
         <div className="max-w-6xl mx-auto px-6 text-center text-slate-500 text-sm">
-          ZenGo Solana Wallet Connect Demo • All rights reserved
+          Made with ❤️ by{" "}
+          <a
+            href="https://zengo.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-indigo-500 hover:text-indigo-600 hover:underline"
+          >
+            Zengo
+          </a>{" "}
+          • All rights reserved
           <div className="mt-2">
             <a
               href="https://github.com/ZenGo-X/solana-test-dapp"
