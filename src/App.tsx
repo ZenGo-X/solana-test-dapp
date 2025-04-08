@@ -11,7 +11,6 @@ import {
   useAppKitProvider,
   useDisconnect,
 } from "@reown/appkit/react";
-// import { useAppKitConnection } from "@reown/appkit-adapter-solana/react";
 import {
   SystemProgram,
   PublicKey,
@@ -29,6 +28,7 @@ import {
   createTransferInstruction,
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
+  createCloseAccountInstruction,
 } from "@solana/spl-token";
 import { verify, etc } from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha512";
@@ -45,7 +45,7 @@ const projectId = import.meta.env.VITE_PROJECT_ID;
 const DEVNET_RPC_URL =
   import.meta.env.VITE_RPC_URL_DEVNET || "https://api.devnet.solana.com";
 const MAINNET_RPC_URL =
-  import.meta.env.VITE_RPC_URL_MAINNET || "https://solana-rpc.publicnode.com";
+  import.meta.env.VITE_RPC_URL_MAINNET || "https://api.mainnet-beta.solana.com";
 
 // Log available RPC endpoints
 console.log(
@@ -64,7 +64,7 @@ if (!DEVNET_RPC_URL) {
 let solanaAdapter = null;
 let appKit = null;
 
-function initializeAppKit(network: any) {
+function initializeAppKit(network: string) {
   const isDevnetNetwork = network === "devnet";
   const rpcEndpoint = isDevnetNetwork ? DEVNET_RPC_URL : MAINNET_RPC_URL;
 
@@ -73,7 +73,6 @@ function initializeAppKit(network: any) {
     wallets: [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
     connectionSettings: {
       commitment: "confirmed",
-      wsEndpoint: rpcEndpoint,
     },
   });
 
@@ -157,7 +156,6 @@ export default function App() {
   const { address, isConnected } = useAppKitAccount();
   const { disconnect } = useDisconnect();
   const { walletProvider } = useAppKitProvider<SolanaProvider>("solana");
-  // const { connection } = useAppKitConnection();
 
   // Network selection state
   const [networkSelection, setNetworkSelection] = useState(
@@ -176,6 +174,18 @@ export default function App() {
   // Custom message state
   const [customMessage, setCustomMessage] = useState("");
   const [showCustomMessageInput, setShowCustomMessageInput] = useState(false);
+
+  // Token account reclaim state
+  const [loadingTokenAccounts, setLoadingTokenAccounts] = useState(false);
+  const [emptyTokenAccounts, setEmptyTokenAccounts] = useState<
+    {
+      pubkey: PublicKey;
+      mint: string;
+      lamports: number;
+    }[]
+  >([]);
+  const [totalReclaimableLamports, setTotalReclaimableLamports] = useState(0);
+  const [isReclaimingSOL, setIsReclaimingSOL] = useState(false);
 
   const [tokenAddress, setTokenAddress] = useState("");
   const [recipientAddress, setRecipientAddress] = useState("");
@@ -232,6 +242,164 @@ export default function App() {
       fetchBalanceDirectly(address, newConnection);
     }
   }, [isDevnet, address]);
+
+  // Function to scan for empty token accounts
+  const scanEmptyTokenAccounts = async () => {
+    if (!address || !directConnection) return;
+    setLoadingTokenAccounts(true);
+    setEmptyTokenAccounts([]);
+    setTotalReclaimableLamports(0);
+    try {
+      // Get all token accounts for the user
+      const tokenAccounts =
+        await directConnection.getParsedTokenAccountsByOwner(
+          new PublicKey(address),
+          { programId: TOKEN_PROGRAM_ID }
+        );
+
+      console.log(`Found ${tokenAccounts.value.length} token accounts`);
+
+      // Filter for accounts with zero balance
+      const emptyAccounts = tokenAccounts.value.filter((account) => {
+        const data = account.account.data.parsed.info;
+        return data.tokenAmount.uiAmount === 0;
+      });
+
+      console.log(`Found ${emptyAccounts.length} empty token accounts`);
+
+      // Format the data to display to the user
+      const formattedEmptyAccounts = emptyAccounts.map((account) => {
+        const accountInfo = account.account;
+        const data = accountInfo.data.parsed.info;
+        return {
+          pubkey: account.pubkey,
+          mint: data.mint,
+          lamports: accountInfo.lamports,
+        };
+      });
+
+      // Calculate total reclaimable SOL
+      const totalLamports = formattedEmptyAccounts.reduce(
+        (sum, account) => sum + account.lamports,
+        0
+      );
+
+      setEmptyTokenAccounts(formattedEmptyAccounts);
+      setTotalReclaimableLamports(totalLamports);
+
+      if (formattedEmptyAccounts.length === 0) {
+        setMessage("No empty token accounts found to reclaim SOL from.");
+      } else {
+        setMessage(
+          `Found ${
+            formattedEmptyAccounts.length
+          } empty token accounts with a total of ${
+            totalLamports / LAMPORTS_PER_SOL
+          } SOL that can be reclaimed.`
+        );
+      }
+    } catch (error) {
+      console.error("Error scanning token accounts:", error);
+      setMessage(
+        `Error scanning token accounts: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    } finally {
+      setLoadingTokenAccounts(false);
+    }
+  };
+
+  // Function to reclaim SOL from empty token accounts
+  const reclaimSOL = async () => {
+    if (
+      !address ||
+      !directConnection ||
+      !walletProvider?.signTransaction ||
+      emptyTokenAccounts.length === 0
+    )
+      return;
+    setIsReclaimingSOL(true);
+    try {
+      // For large number of accounts, batch them in transactions
+      const BATCH_SIZE = 5; // Maximum number of close instructions per transaction
+      const batches = [];
+
+      // Create batches of accounts to close
+      for (let i = 0; i < emptyTokenAccounts.length; i += BATCH_SIZE) {
+        batches.push(emptyTokenAccounts.slice(i, i + BATCH_SIZE));
+      }
+
+      const allSignatures = [];
+
+      // Process each batch
+      for (const [index, batch] of batches.entries()) {
+        // Create a new transaction for this batch
+        const transaction = new Transaction();
+
+        // Add close account instructions for each account in this batch
+        for (const account of batch) {
+          transaction.add(
+            createCloseAccountInstruction(
+              account.pubkey,
+              new PublicKey(address), // Destination - funds go back to owner
+              new PublicKey(address), // Authority
+              [] // Multisig signers if needed
+            )
+          );
+        }
+
+        // Get latest blockhash
+        const latestBlockhash = await directConnection.getLatestBlockhash();
+        transaction.recentBlockhash = latestBlockhash.blockhash;
+        transaction.feePayer = new PublicKey(address);
+
+        // Sign and send transaction
+        const signed = await walletProvider.signTransaction(transaction);
+        const signature = await directConnection.sendRawTransaction(
+          signed.serialize()
+        );
+        allSignatures.push(signature);
+
+        console.log(
+          `Sent batch ${index + 1}/${
+            batches.length
+          } with signature: ${signature}`
+        );
+
+        // Wait for confirmation before processing next batch
+        await waitForConfirmation(directConnection, signature);
+      }
+
+      // Set last signature for UI display
+      if (allSignatures.length > 0) {
+        setLastSignature(allSignatures[allSignatures.length - 1]);
+        setShowTransactionExplorer(true);
+      }
+
+      setMessage(
+        `Successfully reclaimed SOL from ${emptyTokenAccounts.length} token accounts! ` +
+          `Total SOL reclaimed: ${
+            totalReclaimableLamports / LAMPORTS_PER_SOL
+          } SOL. ` +
+          `Transactions: ${allSignatures.join(", ")}`
+      );
+
+      // Reset state and refresh balance
+      setEmptyTokenAccounts([]);
+      setTotalReclaimableLamports(0);
+      await fetchBalance();
+    } catch (error) {
+      console.error("Error reclaiming SOL:", error);
+      setMessage(
+        `Error reclaiming SOL: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    } finally {
+      setIsReclaimingSOL(false);
+    }
+  };
 
   // Move this check after all hooks
   useEffect(() => {
@@ -351,6 +519,10 @@ export default function App() {
         customMessage ||
         "Hello from Solana Zengo Test! " + new Date().toISOString();
       const encodedMessage = new TextEncoder().encode(messageStr);
+
+      // Store the encoded message in hex format for display
+      const encodedHex = Buffer.from(encodedMessage).toString("hex");
+
       const signature = await walletProvider.signMessage(encodedMessage);
 
       // Verify signature
@@ -363,7 +535,7 @@ export default function App() {
       setIsSignatureValid(isValid);
       const signatureHex = Buffer.from(signature).toString("hex");
       setMessage(
-        `Message signed and verified!\nMessage: ${messageStr}\nSignature: ${signatureHex}\nValid: ${isValid}`
+        `Message signed and verified!\nMessage: ${messageStr}\nSignature: ${signatureHex}\nValid: ${isValid}\nEncoded Message (hex): ${encodedHex}`
       );
       // Hide transaction explorer for this action
       hideTransactionExplorer();
@@ -1100,6 +1272,155 @@ export default function App() {
                     )}
                   </button>
                 </div>
+              </div>
+
+              {/* SOL Reclaimer Section */}
+              <div className="bg-white shadow-md rounded-xl p-6 border border-slate-100 col-span-1 md:col-span-2">
+                <h3 className="font-semibold text-lg mb-2 text-slate-800">
+                  SOL Reclaimer
+                </h3>
+                <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200 text-sm text-blue-800">
+                  <p className="mb-2 font-medium">What is this?</p>
+                  <p>
+                    When you create token accounts on Solana, some SOL is locked
+                    as "rent" to keep the account alive. If you have emptied
+                    token accounts (with 0 balance), you can reclaim this SOL!
+                  </p>
+                  <p className="mt-2">
+                    Click "Scan for Claimable SOL" to look for token accounts
+                    with 0 balance, then reclaim the locked SOL.
+                  </p>
+                </div>
+
+                <div className="flex flex-col md:flex-row gap-3 mb-4">
+                  <button
+                    onClick={scanEmptyTokenAccounts}
+                    disabled={loadingTokenAccounts || !isConnected}
+                    className="bg-amber-600 text-white px-4 py-3 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-1"
+                  >
+                    {loadingTokenAccounts ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg
+                          className="animate-spin h-4 w-4 text-white"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
+                        Scanning...
+                      </span>
+                    ) : (
+                      "Scan for Claimable SOL"
+                    )}
+                  </button>
+
+                  <button
+                    onClick={reclaimSOL}
+                    disabled={
+                      isReclaimingSOL ||
+                      emptyTokenAccounts.length === 0 ||
+                      !isConnected
+                    }
+                    className="bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-1"
+                  >
+                    {isReclaimingSOL ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg
+                          className="animate-spin h-4 w-4 text-white"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
+                        Reclaiming SOL...
+                      </span>
+                    ) : (
+                      `Reclaim SOL (${(
+                        totalReclaimableLamports / LAMPORTS_PER_SOL
+                      ).toFixed(6)} SOL)`
+                    )}
+                  </button>
+                </div>
+
+                {emptyTokenAccounts.length > 0 && (
+                  <div className="mt-4 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <h4 className="font-medium text-slate-700 mb-2">
+                      Found {emptyTokenAccounts.length} empty token accounts:
+                    </h4>
+                    <div className="max-h-60 overflow-y-auto">
+                      <table className="w-full text-sm text-left">
+                        <thead className="text-xs uppercase bg-slate-100">
+                          <tr>
+                            <th className="px-2 py-2">Token Mint</th>
+                            <th className="px-2 py-2 text-right">
+                              Reclaimable SOL
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {emptyTokenAccounts.map((account, index) => (
+                            <tr
+                              key={account.pubkey.toString()}
+                              className={
+                                index % 2 === 0 ? "bg-white" : "bg-slate-50"
+                              }
+                            >
+                              <td className="px-2 py-2 font-mono text-xs">
+                                {account.mint.substring(0, 4)}...
+                                {account.mint.substring(
+                                  account.mint.length - 4
+                                )}
+                              </td>
+                              <td className="px-2 py-2 text-right">
+                                {(account.lamports / LAMPORTS_PER_SOL).toFixed(
+                                  6
+                                )}{" "}
+                                SOL
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="font-medium bg-slate-100">
+                          <tr>
+                            <td className="px-2 py-2">Total</td>
+                            <td className="px-2 py-2 text-right">
+                              {(
+                                totalReclaimableLamports / LAMPORTS_PER_SOL
+                              ).toFixed(6)}{" "}
+                              SOL
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
